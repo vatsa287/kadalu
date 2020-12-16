@@ -77,7 +77,9 @@ pylint:
 	@pylint --disable=W0511 -s n csi/volumeutils.py
 	@pylint --disable=W0511 -s n operator/main.py
 	@pylint --disable=W0511 -s n extras/scripts/gen_manifest.py
+	@pylint --disable=R0801 -s n cli/kubectl_kadalu/storage_add.py
 	@pylint --disable=R0902 -s n cli/kubectl_kadalu/storage_list.py
+	@pylint --disable=R0801 -s n cli/kubectl_kadalu/storage_remove.py
 	@pylint --disable=R0902 -s n cli/kubectl_kadalu/utils.py
 	@rm csi/kadalulib.py
 	@rm server/kadalulib.py

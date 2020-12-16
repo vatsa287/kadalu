@@ -1,0 +1,192 @@
+"""
+'storage-remove' sub command
+"""
+
+# noqa # pylint: disable=duplicate-code
+# noqa # pylint: disable=too-many-branches
+
+#To prevent Py2 to interpreting print(val) as a tuple.
+from __future__ import print_function
+
+import os
+import tempfile
+import sys
+import json
+
+import utils
+from storage_yaml import to_storage_yaml
+
+
+def set_args(name, subparsers):
+    """ add arguments, and their options """
+
+    parser = subparsers.add_parser(name)
+    arg = parser.add_argument
+
+    arg(
+        "name",
+        help="Storage Name"
+    )
+    utils.add_global_flags(parser)
+
+
+def validate(args):
+    """
+    Validate the storage requested to be deleted
+    is present in kadalu configmap or not.
+    Exit if not present.
+    """
+
+    storage_info_data = get_configmap_data(args.name)
+
+    if storage_info_data is None:
+        print("Aborting.....")
+        print("Invalid name. No such storage '%s' in Kadalu configmap." % args.name)
+        sys.exit(1)
+
+
+def get_configmap_data(volname):
+    """
+    Get storage info data from kadalu configmap
+    """
+
+    cmd = utils.kubectl_cmd(args) + ["get", "configmap", "kadalu-info", "-nkadalu", "-ojson"]
+
+    try:
+        resp = utils.execute(cmd)
+        config_data = json.loads(resp.stdout)
+
+        data = config_data['data']
+        storage_name = "%s.info" % volname
+        storage_info_data = data[storage_name]
+
+        # Return data in 'dict' format
+        return json.loads(storage_info_data)
+
+    except utils.CommandError as err:
+        utils.command_error(cmd, err.stderr)
+
+    except KeyError:
+        # Validate method expects None when 'storage' not found.
+        return None
+
+
+def storage_add_data(args):
+    """ Build the config file """
+
+    storage_info_data = get_configmap_data(args.name)
+
+    content = {
+        "apiVersion": "kadalu-operator.storage/v1alpha1",
+        "kind": "KadaluStorage",
+        "metadata": {
+            "name": args.name
+        },
+        "spec": {
+            "type": storage_info_data['type'],
+            "storage": []
+        }
+    }
+
+    # External details are specified, no 'storage' section required
+    if storage_info_data['type'] == "External":
+        # TODO: Check keynames from kadalu configmap and set node, vol
+        node = ""
+        vol = ""
+        content["spec"]["details"] = [
+            {
+                "gluster_host": node,
+                "gluster_volname": vol.strip("/")
+            }
+        ]
+        return content
+
+    # Everything below can be provided for a 'Replica3' setup.
+    # Or two types of data can be provided for 'Replica2'.
+    # So, return only at the end.
+
+    bricks = storage_info_data.get('bricks')
+
+    for brick in bricks:
+
+        # If Device is specified
+        if brick['brick_device']:
+
+            node = brick['node']
+            dev = brick['brick_device']
+            content["spec"]["storage"].append(
+                {
+                    "node": node,
+                    "device": dev
+                }
+            )
+
+        # If Path is specified
+        if brick['host_brick_path']:
+
+            node = brick['node']
+            path = brick['host_brick_path']
+            content["spec"]["storage"].append(
+                {
+                    "node": node,
+                    "path": path
+                }
+            )
+
+        # If PVC is specified
+        if brick['pvc_name']:
+
+            pvc = storage_info_data['pvc_name']
+            content["spec"]["storage"].append(
+                {
+                    "pvc": pvc
+                }
+            )
+
+    return content
+
+
+def run(args):
+    """ Adds the subcommand arguments back to main CLI tool """
+    data = storage_add_data(args)
+
+    yaml_content = to_storage_yaml(data)
+    print("Storage Yaml file for your reference:\n")
+    print(yaml_content)
+
+    if args.dry_run:
+        return
+
+    if not args.script_mode:
+        answer = ""
+        valid_answers = ["yes", "no", "n", "y"]
+
+        while answer not in valid_answers:
+            answer = input("Is this correct?(Yes/No): ")
+            answer = answer.strip().lower()
+
+        if answer in ["n", "no"]:
+            return
+
+    config, tempfile_path = tempfile.mkstemp(prefix="kadalu")
+    try:
+        with os.fdopen(config, 'w') as tmp:
+            tmp.write(yaml_content)
+
+        cmd = utils.kubectl_cmd(args) + ["delete", "-f", tempfile_path]
+        resp = utils.execute(cmd)
+        print("Storage delete request sent successfully")
+        print(resp.stdout)
+        print()
+
+    except utils.CommandError as err:
+        os.remove(tempfile_path)
+        utils.command_error(cmd, err.stderr)
+
+    except FileNotFoundError:
+        os.remove(tempfile_path)
+        utils.kubectl_cmd_help(args.kubectl_cmd)
+
+    finally:
+        if os.path.exists(tempfile_path):
+            os.remove(tempfile_path)
