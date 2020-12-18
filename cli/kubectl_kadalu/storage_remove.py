@@ -7,6 +7,10 @@
 
 #To prevent Py2 to interpreting print(val) as a tuple.
 from __future__ import print_function
+<<<<<<< HEAD
+=======
+from string import Template
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
 
 import os
 import tempfile
@@ -14,7 +18,16 @@ import sys
 import json
 
 import utils
+<<<<<<< HEAD
 from storage_yaml import to_storage_yaml
+=======
+
+YAML_TEMPLATE = """apiVersion: "kadalu-operator.storage/v1alpha1"
+kind: "KadaluStorage"
+metadata:
+  name: "${name}"
+"""
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
 
 
 def set_args(name, subparsers):
@@ -37,7 +50,11 @@ def validate(args):
     Exit if not present.
     """
 
+<<<<<<< HEAD
     storage_info_data = get_configmap_data(args.name)
+=======
+    storage_info_data = get_configmap_data(args)
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
 
     if storage_info_data is None:
         print("Aborting.....")
@@ -45,7 +62,11 @@ def validate(args):
         sys.exit(1)
 
 
+<<<<<<< HEAD
 def get_configmap_data(volname):
+=======
+def get_configmap_data(args):
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
     """
     Get storage info data from kadalu configmap
     """
@@ -56,6 +77,10 @@ def get_configmap_data(volname):
         resp = utils.execute(cmd)
         config_data = json.loads(resp.stdout)
 
+<<<<<<< HEAD
+=======
+        volname = args.name
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
         data = config_data['data']
         storage_name = "%s.info" % volname
         storage_info_data = data[storage_name]
@@ -74,13 +99,17 @@ def get_configmap_data(volname):
 def storage_add_data(args):
     """ Build the config file """
 
+<<<<<<< HEAD
     storage_info_data = get_configmap_data(args.name)
 
+=======
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
     content = {
         "apiVersion": "kadalu-operator.storage/v1alpha1",
         "kind": "KadaluStorage",
         "metadata": {
             "name": args.name
+<<<<<<< HEAD
         },
         "spec": {
             "type": storage_info_data['type'],
@@ -143,14 +172,25 @@ def storage_add_data(args):
                 }
             )
 
+=======
+        }
+    }
+
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
     return content
 
 
 def run(args):
     """ Adds the subcommand arguments back to main CLI tool """
+<<<<<<< HEAD
     data = storage_add_data(args)
 
     yaml_content = to_storage_yaml(data)
+=======
+
+    yaml_content = Template(YAML_TEMPLATE).substitute(name=args.name)
+
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
     print("Storage Yaml file for your reference:\n")
     print(yaml_content)
 
@@ -175,7 +215,11 @@ def run(args):
 
         cmd = utils.kubectl_cmd(args) + ["delete", "-f", tempfile_path]
         resp = utils.execute(cmd)
+<<<<<<< HEAD
         print("Storage delete request sent successfully")
+=======
+        print("Storage delete request sent successfully.\n")
+>>>>>>> aa55e4d34cd91cded58fe1dfbe28eddb42982be3
         print(resp.stdout)
         print()
 
