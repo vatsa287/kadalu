@@ -14,7 +14,7 @@ from volumeutils import mount_and_select_hosting_volume, \
     create_virtblock_volume, create_subdir_volume, delete_volume, \
     get_pv_hosting_volumes, PV_TYPE_SUBVOL, PV_TYPE_VIRTBLOCK, \
     HOSTVOL_MOUNTDIR, check_external_volume, \
-    update_free_size, unmount_glusterfs
+    update_free_size, unmount_glusterfs, expand_volume
 from kadalulib import logf, send_analytics_tracker
 
 VOLINFO_DIR = "/var/lib/gluster"
@@ -26,6 +26,7 @@ class ControllerServer(csi_pb2_grpc.ControllerServicer):
     volume mount and PV creation.
     Ref:https://github.com/container-storage-interface/spec/blob/master/spec.md
     """
+
     # noqa # pylint: disable=too-many-locals,too-many-statements,too-many-branches
     def CreateVolume(self, request, context):
         start_time = time.time()
@@ -255,6 +256,81 @@ class ControllerServer(csi_pb2_grpc.ControllerServicer):
                     "rpc": {
                         "type": capability_type("LIST_VOLUMES")
                     }
+                },
+                {
+                    "rpc": {
+                        "type": capability_type("EXPAND_VOLUME")
+                    }
                 }
             ]
         )
+
+
+def ControllerExpandVolume(self, request, context):
+        """
+        Controller plugin RPC call implementation of EXPAND_VOLUME
+        """
+
+        start_time = time.time()
+        expansion_requested_pvsize = request.capacity_range.required_bytes
+
+        #expand_volume(request.volume_id, expansion_requested_pvsize)
+
+        pvtype = PV_TYPE_SUBVOL
+
+        if KADALU_VERSION in ["0.5.0", "0.4.0", "0.3.0"]:
+            for vol_capability in request.volume_capabilities:
+                # using getattr to avoid Pylint error
+                single_node_writer = getattr(csi_pb2.VolumeCapability.AccessMode,
+                                             "SINGLE_NODE_WRITER")
+
+                if vol_capability.access_mode.mode == single_node_writer:
+                    pvtype = PV_TYPE_VIRTBLOCK
+
+        logging.debug(logf(
+            "Found PV type",
+            pvtype=pvtype,
+            capabilities=request.volume_capabilities
+        ))
+
+        hostvol = mount_and_select_hosting_volume(host_volumes, expansion_requested_pvsize)
+        if hostvol is None:
+            errmsg = "No Hosting Volumes available, add more storage"
+            logging.error(errmsg)
+            context.set_details(errmsg)
+            context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
+            return csi_pb2.CreateVolumeResponse()
+
+        mntdir = os.path.join(HOSTVOL_MOUNTDIR, hostvol)
+        if pvtype == PV_TYPE_VIRTBLOCK:
+            vol = update_virtblock_volume(
+                mntdir, request.name, expansion_requested_pvsize)
+        else:
+            vol = update_subdir_volume(
+                mntdir, request.name, expansion_requested_pvsize)
+
+        logging.info(logf(
+            "Volume expanded",
+            name=request.name,
+            size=expansion_requested_pvsize,
+            hostvol=hostvol,
+            pvtype=pvtype,
+            volpath=vol.volpath,
+            duration_seconds=time.time() - start_time
+        ))
+
+        # sizechanged is the additional change to be
+        # subtracted from storage-pool
+        sizechange = expansion_requested_pvsize - pvsize
+        update_free_size(hostvol, request.name, -sizechange)
+
+        if not hostvoltype:
+            hostvoltype = "unknown"
+
+        send_analytics_tracker("pvc-%s" % hostvoltype, uid)
+        return csi_pb2.ControllerExpandVolumeResponse(
+            volume={
+                "capacity_bytes": expansion_requested_pvsize,
+                "node_expansion_required": False
+                }
+            )
